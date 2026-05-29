@@ -29,6 +29,18 @@ export interface DashboardSummary {
   topMedicines: Array<Record<string, unknown>>;
 }
 
+export interface ReorderSuggestion {
+  id: string;
+  name: string;
+  sku: string;
+  stockQuantity: number;
+  reorderPoint: number;
+  minimumStock: number;
+  suggestedOrderQuantity: number;
+  category?: string;
+  supplierId?: string;
+}
+
 type RevenueReportRow = {
   date: string;
   revenue: string;
@@ -115,6 +127,10 @@ export class ReportsService {
 
   async getTopSellingReport(limit = 20) {
     return this.salesRepo.getTopSellingMedicines(limit);
+  }
+
+  async getReorderSuggestionsReport(limit = 20): Promise<ReorderSuggestion[]> {
+    return this.inventoryRepo.getReorderSuggestions(limit);
   }
 
   async exportRevenueReportCsv(period: 'daily' | 'monthly' | 'yearly', date?: Date): Promise<string> {

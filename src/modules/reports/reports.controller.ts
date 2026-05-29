@@ -56,6 +56,12 @@ export class ReportsController {
     return this.reportsService.getTopSellingReport(limit ? +limit : 20);
   }
 
+  @Get('reorder-suggestions')
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getReorderSuggestions(@Query('limit') limit?: number) {
+    return this.reportsService.getReorderSuggestionsReport(limit ? +limit : 20);
+  }
+
   @Get('export/:type')
   @ApiQuery({ name: 'period', enum: ['daily', 'monthly', 'yearly'], required: false })
   @ApiQuery({ name: 'date', required: false, type: String })

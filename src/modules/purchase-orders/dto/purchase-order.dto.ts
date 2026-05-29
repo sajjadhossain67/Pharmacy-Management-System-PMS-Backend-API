@@ -77,3 +77,30 @@ export class ReceivePurchaseOrderDto {
   @IsOptional() @IsDateString()
   receivedDate?: string;
 }
+
+export class CreateReorderPurchaseOrderDto {
+  @ApiProperty()
+  @IsUUID()
+  supplierId: string;
+
+  @ApiPropertyOptional({ description: 'Only include these medicine IDs. If omitted, all matching reorder suggestions for the supplier are used.' })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  medicineIds?: string[];
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  orderDate?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  expectedDeliveryDate?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}

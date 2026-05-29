@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PurchaseOrdersRepository } from './purchase-orders.repository';
 import { InventoryRepository } from '../inventory/inventory.repository';
-import { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, ReceivePurchaseOrderDto } from './dto/purchase-order.dto';
+import {
+  CreatePurchaseOrderDto,
+  UpdatePurchaseOrderDto,
+  ReceivePurchaseOrderDto,
+  CreateReorderPurchaseOrderDto,
+} from './dto/purchase-order.dto';
 import { QueryFilterDto } from '../../common/dto/query-filter.dto';
 import { PurchaseOrderStatus, StockMovementType, StockMovementDirection } from '../../common/enums';
 import { ResourceNotFoundException, InvalidOperationException } from '../../common/exceptions/app.exception';
@@ -40,6 +45,60 @@ export class PurchaseOrdersService {
     });
 
     this.events.emit('purchase-order.created', { po, createdBy });
+    return po;
+  }
+
+  async createFromReorderSuggestions(dto: CreateReorderPurchaseOrderDto, createdBy: string) {
+    const suggestions = await this.inventoryRepo.getReorderSuggestions(200, dto.supplierId);
+    const selectedSuggestions = dto.medicineIds?.length
+      ? suggestions.filter((suggestion) => dto.medicineIds?.includes(suggestion.id))
+      : suggestions;
+
+    if (selectedSuggestions.length === 0) {
+      throw new InvalidOperationException('No reorder suggestions available for the selected supplier or medicines');
+    }
+
+    const items = await Promise.all(
+      selectedSuggestions.map(async (suggestion) => {
+        const medicine = await this.inventoryRepo.findMedicineById(suggestion.id);
+        if (!medicine) {
+          throw new ResourceNotFoundException('Medicine', suggestion.id);
+        }
+
+        return {
+          medicineId: medicine.id,
+          medicineName: medicine.name,
+          orderedQuantity: suggestion.suggestedOrderQuantity,
+          unitPrice: Number(medicine.buyingPrice || 0),
+          taxPercent: Number(medicine.taxPercent || 0),
+          batchNumber: medicine.batchNumber,
+          expiryDate: medicine.expiryDate ? new Date(medicine.expiryDate) : undefined,
+        };
+      }),
+    );
+
+    const orderDate = dto.orderDate ? new Date(dto.orderDate) : new Date();
+    const expectedDeliveryDate = dto.expectedDeliveryDate ? new Date(dto.expectedDeliveryDate) : undefined;
+    const subtotal = items.reduce((sum, item) => sum + item.orderedQuantity * item.unitPrice, 0);
+    const taxAmount = items.reduce((sum, item) => sum + (item.orderedQuantity * item.unitPrice * (item.taxPercent || 0)) / 100, 0);
+    const totalAmount = subtotal + taxAmount;
+
+    const po = await this.poRepo.create({
+      orderNumber: await this.poRepo.generateOrderNumber(),
+      supplierId: dto.supplierId,
+      orderDate,
+      expectedDeliveryDate,
+      notes: dto.notes || 'Auto-generated from reorder suggestions',
+      subtotal,
+      taxAmount,
+      totalAmount,
+      items: items as any,
+      createdById: createdBy,
+      createdBy,
+      status: PurchaseOrderStatus.DRAFT,
+    });
+
+    this.events.emit('purchase-order.created', { po, createdBy, source: 'reorder-suggestions' });
     return po;
   }
 

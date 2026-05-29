@@ -163,6 +163,52 @@ export class InventoryRepository {
     }));
   }
 
+  async getReorderSuggestions(limit = 20, supplierId?: string): Promise<
+    Array<{
+      id: string;
+      name: string;
+      sku: string;
+      stockQuantity: number;
+      reorderPoint: number;
+      minimumStock: number;
+      suggestedOrderQuantity: number;
+      category?: string;
+      supplierId?: string;
+    }>
+  > {
+    const medicines = await this.medicineRepo
+      .createQueryBuilder('medicine')
+      .leftJoinAndSelect('medicine.category', 'category')
+      .where('medicine.is_deleted = false')
+      .andWhere('medicine.stock_quantity <= medicine.reorder_point')
+      .andWhere(supplierId ? 'medicine.supplier_id = :supplierId' : '1=1', { supplierId })
+      .orderBy('medicine.stock_quantity', 'ASC')
+      .addOrderBy('medicine.reorder_point', 'DESC')
+      .limit(limit)
+      .getMany();
+
+    return medicines.map((medicine) => {
+      const targetStock = Math.max(
+        Number(medicine.maximumStock || 0),
+        Number(medicine.reorderPoint || 0) * 2,
+        Number(medicine.minimumStock || 0),
+      );
+      const suggestedOrderQuantity = Math.max(targetStock - Number(medicine.stockQuantity || 0), 0);
+
+      return {
+        id: medicine.id,
+        name: medicine.name,
+        sku: medicine.sku,
+        stockQuantity: Number(medicine.stockQuantity || 0),
+        reorderPoint: Number(medicine.reorderPoint || 0),
+        minimumStock: Number(medicine.minimumStock || 0),
+        suggestedOrderQuantity,
+        category: medicine.category?.name,
+        supplierId: medicine.supplierId,
+      };
+    });
+  }
+
   // ─── Categories ───────────────────────────────────────────────
 
   async createCategory(data: Partial<CategoryEntity>): Promise<CategoryEntity> {

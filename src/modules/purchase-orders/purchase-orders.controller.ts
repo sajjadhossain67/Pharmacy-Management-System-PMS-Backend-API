@@ -4,7 +4,12 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PurchaseOrdersService } from './purchase-orders.service';
-import { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, ReceivePurchaseOrderDto } from './dto/purchase-order.dto';
+import {
+  CreatePurchaseOrderDto,
+  UpdatePurchaseOrderDto,
+  ReceivePurchaseOrderDto,
+  CreateReorderPurchaseOrderDto,
+} from './dto/purchase-order.dto';
 import { QueryFilterDto } from '../../common/dto/query-filter.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -24,6 +29,15 @@ export class PurchaseOrdersController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.PHARMACIST)
   create(@Body() dto: CreatePurchaseOrderDto, @CurrentUser() user: JwtPayload) {
     return this.service.create(dto, user.sub);
+  }
+
+  @Post('from-reorder-suggestions')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.PHARMACIST)
+  createFromReorderSuggestions(
+    @Body() dto: CreateReorderPurchaseOrderDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.createFromReorderSuggestions(dto, user.sub);
   }
 
   @Get()
