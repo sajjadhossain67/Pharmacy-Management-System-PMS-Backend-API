@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThanOrEqual, LessThan } from 'typeorm';
+import { Repository } from 'typeorm';
 import { MedicineEntity } from './entities/medicine.entity';
 import { CategoryEntity } from './entities/category.entity';
 import { StockMovementEntity } from './entities/stock-movement.entity';
@@ -8,7 +8,6 @@ import { QueryFilterDto } from '../../common/dto/query-filter.dto';
 import { CustomQueryBuilder } from '../../common/custom-queries/query.builder';
 import { PaginatedResult } from '../../common/interceptors/response.interceptor';
 import { StockMovementType, StockMovementDirection } from '../../common/enums';
-import { isExpiringWithinDays } from '../../common/utils/date.util';
 
 @Injectable()
 export class InventoryRepository {
@@ -110,6 +109,58 @@ export class InventoryRepository {
       .where('medicine.is_deleted = false')
       .getRawOne<{ totalValue: string }>();
     return parseFloat(result?.totalValue || '0');
+  }
+
+  async getInventoryKpis(): Promise<{
+    activeMedicines: number;
+    totalUnits: number;
+    lowStockCount: number;
+    expiringWithin30DaysCount: number;
+  }> {
+    const [activeMedicines, totalUnits, lowStockItems, expiringItems] = await Promise.all([
+      this.medicineRepo.count({ where: { isDeleted: false } }),
+      this.medicineRepo
+        .createQueryBuilder('medicine')
+        .select('COALESCE(SUM(medicine.stock_quantity), 0)', 'totalUnits')
+        .where('medicine.is_deleted = false')
+        .getRawOne<{ totalUnits: string }>(),
+      this.getLowStockMedicines(),
+      this.getExpiringMedicines(30),
+    ]);
+
+    return {
+      activeMedicines,
+      totalUnits: parseInt(totalUnits?.totalUnits || '0'),
+      lowStockCount: lowStockItems.length,
+      expiringWithin30DaysCount: expiringItems.length,
+    };
+  }
+
+  async getCategoryBreakdown(limit = 10): Promise<{
+    category: string;
+    medicineCount: number;
+    stockUnits: number;
+    inventoryValue: number;
+  }[]> {
+    const rows = await this.medicineRepo
+      .createQueryBuilder('medicine')
+      .leftJoin('medicine.category', 'category')
+      .select("COALESCE(category.name, 'Uncategorized')", 'category')
+      .addSelect('COUNT(medicine.id)', 'medicineCount')
+      .addSelect('COALESCE(SUM(medicine.stock_quantity), 0)', 'stockUnits')
+      .addSelect('COALESCE(SUM(medicine.stock_quantity * medicine.buying_price), 0)', 'inventoryValue')
+      .where('medicine.is_deleted = false')
+      .groupBy("COALESCE(category.name, 'Uncategorized')")
+      .orderBy('medicineCount', 'DESC')
+      .limit(limit)
+      .getRawMany<{ category: string; medicineCount: string; stockUnits: string; inventoryValue: string }>();
+
+    return rows.map((row) => ({
+      category: row.category,
+      medicineCount: parseInt(row.medicineCount || '0'),
+      stockUnits: parseInt(row.stockUnits || '0'),
+      inventoryValue: parseFloat(row.inventoryValue || '0'),
+    }));
   }
 
   // ─── Categories ───────────────────────────────────────────────

@@ -103,4 +103,27 @@ export class SalesRepository {
       .limit(limit)
       .getRawMany();
   }
+
+  async getRevenueTrend(days = 7) {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - Math.max(days - 1, 0));
+
+    const rows = await this.saleRepo
+      .createQueryBuilder('sale')
+      .select('DATE(sale.sale_date)', 'date')
+      .addSelect('SUM(sale.total_amount)', 'revenue')
+      .addSelect('COUNT(*)', 'transactions')
+      .where('sale.sale_date >= :startDate', { startDate })
+      .andWhere('sale.status != :cancelled', { cancelled: 'cancelled' })
+      .andWhere('sale.is_deleted = false')
+      .groupBy('DATE(sale.sale_date)')
+      .orderBy('date', 'ASC')
+      .getRawMany<{ date: string; revenue: string; transactions: string }>();
+
+    return rows.map((row) => ({
+      date: row.date,
+      revenue: parseFloat(row.revenue || '0'),
+      transactions: parseInt(row.transactions || '0'),
+    }));
+  }
 }

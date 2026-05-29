@@ -1,5 +1,6 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -16,6 +17,11 @@ export class ReportsController {
   @Get('dashboard')
   getDashboard() {
     return this.reportsService.getDashboardSummary();
+  }
+
+  @Get('dashboard/trends')
+  getDashboardTrends() {
+    return this.reportsService.getDashboardTrends();
   }
 
   @Get('revenue')
@@ -48,5 +54,31 @@ export class ReportsController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   getTopSelling(@Query('limit') limit?: number) {
     return this.reportsService.getTopSellingReport(limit ? +limit : 20);
+  }
+
+  @Get('export/:type')
+  @ApiQuery({ name: 'period', enum: ['daily', 'monthly', 'yearly'], required: false })
+  @ApiQuery({ name: 'date', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  exportReport(
+    @Param('type') type: 'revenue' | 'inventory' | 'top-selling',
+    @Query('period') period: 'daily' | 'monthly' | 'yearly' = 'monthly',
+    @Query('date') date?: string,
+    @Query('limit') limit?: number,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const filename = `reports-${type}-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    if (type === 'revenue') {
+      return this.reportsService.exportRevenueReportCsv(period, date ? new Date(date) : undefined);
+    }
+
+    if (type === 'inventory') {
+      return this.reportsService.exportInventoryReportCsv();
+    }
+
+    return this.reportsService.exportTopSellingReportCsv(limit ? +limit : 20);
   }
 }

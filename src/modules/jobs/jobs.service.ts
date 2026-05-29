@@ -1,8 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { InventoryRepository } from '../inventory/inventory.repository';
 import { NotificationsService } from '../notifications/notifications.service';
-import { isExpiringWithinDays } from '../../common/utils/date.util';
+import { NotificationEntity } from '../notifications/entities/notification.entity';
+import { RefreshTokenEntity } from '../auth/entities/refresh-token.entity';
 
 @Injectable()
 export class JobsService {
@@ -11,6 +14,10 @@ export class JobsService {
   constructor(
     private readonly inventoryRepo: InventoryRepository,
     private readonly notificationsService: NotificationsService,
+    @InjectRepository(NotificationEntity)
+    private readonly notificationRepo: Repository<NotificationEntity>,
+    @InjectRepository(RefreshTokenEntity)
+    private readonly refreshTokenRepo: Repository<RefreshTokenEntity>,
   ) {}
 
   // Run daily at 08:00
@@ -63,7 +70,33 @@ export class JobsService {
   @Cron('0 0 * * 1', { name: 'weekly-cleanup' })
   async weeklyCleanup(): Promise<void> {
     this.logger.log('Running weekly cleanup...');
-    // Placeholder for future cleanup tasks (old notifications, expired tokens, etc.)
-    this.logger.log('Weekly cleanup complete.');
+
+    const notificationCutoff = new Date();
+    notificationCutoff.setDate(notificationCutoff.getDate() - 90);
+
+    const tokenCutoff = new Date();
+    tokenCutoff.setDate(tokenCutoff.getDate() - 30);
+
+    const [notificationCleanup, tokenCleanup] = await Promise.all([
+      this.notificationRepo
+        .createQueryBuilder()
+        .delete()
+        .from(NotificationEntity)
+        .where('is_read = true')
+        .andWhere('read_at IS NOT NULL')
+        .andWhere('read_at < :notificationCutoff', { notificationCutoff })
+        .execute(),
+      this.refreshTokenRepo
+        .createQueryBuilder()
+        .delete()
+        .from(RefreshTokenEntity)
+        .where('expires_at < :now', { now: new Date() })
+        .orWhere('(is_revoked = true AND updated_at < :tokenCutoff)', { tokenCutoff })
+        .execute(),
+    ]);
+
+    this.logger.log(
+      `Weekly cleanup complete. Removed ${(notificationCleanup.affected ?? 0)} notifications and ${(tokenCleanup.affected ?? 0)} refresh tokens.`,
+    );
   }
 }

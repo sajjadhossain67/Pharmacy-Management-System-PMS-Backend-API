@@ -3,6 +3,55 @@ import { SalesRepository } from '../sales/sales.repository';
 import { InventoryRepository } from '../inventory/inventory.repository';
 import { startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear } from '../../common/utils/date.util';
 
+export interface DashboardSummary {
+  today: {
+    total: number;
+    count: number;
+  };
+  revenueTrend: Array<{
+    date: string;
+    revenue: number;
+    transactions: number;
+  }>;
+  inventoryValue: number;
+  inventoryKpis: {
+    activeMedicines: number;
+    totalUnits: number;
+    lowStockCount: number;
+    expiringWithin30DaysCount: number;
+  };
+  categoryBreakdown: Array<{
+    category: string;
+    medicineCount: number;
+    stockUnits: number;
+    inventoryValue: number;
+  }>;
+  topMedicines: Array<Record<string, unknown>>;
+}
+
+type RevenueReportRow = {
+  date: string;
+  revenue: string;
+  transactions: string;
+};
+
+type InventoryReportRow = {
+  id?: string;
+  name?: string;
+  sku?: string;
+  stockQuantity?: number;
+  minimumStock?: number;
+  expiryDate?: string | Date;
+  category?: { name?: string } | string;
+};
+
+type TopSellingRow = {
+  medicineId?: string;
+  medicineName?: string;
+  totalSold?: string;
+  totalRevenue?: string;
+};
+
 @Injectable()
 export class ReportsService {
   constructor(
@@ -68,29 +117,103 @@ export class ReportsService {
     return this.salesRepo.getTopSellingMedicines(limit);
   }
 
-  async getDashboardSummary() {
-    const [
-      todaySales,
-      inventoryValue,
-      lowStockItems,
-      expiringItems,
-      topMedicines,
-    ] = await Promise.all([
-      this.salesRepo.getDailySales(new Date()),
-      this.inventoryRepo.getInventoryValue(),
+  async exportRevenueReportCsv(period: 'daily' | 'monthly' | 'yearly', date?: Date): Promise<string> {
+    const report = await this.getRevenueReport(period, date);
+    const rows = report.breakdown as RevenueReportRow[];
+
+    return this.buildCsv([
+      ['date', 'revenue', 'transactions'],
+      ...rows.map((row) => [row.date, row.revenue, row.transactions]),
+    ]);
+  }
+
+  async exportInventoryReportCsv(): Promise<string> {
+    const [lowStock, expiring, inventoryValue] = await Promise.all([
       this.inventoryRepo.getLowStockMedicines(),
       this.inventoryRepo.getExpiringMedicines(30),
+      this.inventoryRepo.getInventoryValue(),
+    ]);
+
+    return this.buildCsv([
+      ['section', 'id', 'name', 'sku', 'stockQuantity', 'minimumStock', 'expiryDate', 'category', 'inventoryValue'],
+      ...lowStock.map((item) => [
+        'low-stock',
+        item.id,
+        item.name,
+        item.sku,
+        String(item.stockQuantity),
+        String(item.minimumStock),
+        item.expiryDate ? new Date(item.expiryDate).toISOString() : '',
+        item.category?.name ?? '',
+        '',
+      ]),
+      ...expiring.map((item) => [
+        'expiring',
+        item.id,
+        item.name,
+        item.sku,
+        String(item.stockQuantity),
+        String(item.minimumStock),
+        item.expiryDate ? new Date(item.expiryDate).toISOString() : '',
+        item.category?.name ?? '',
+        '',
+      ]),
+      ['summary', '', '', '', '', '', '', '', String(inventoryValue)],
+    ]);
+  }
+
+  async exportTopSellingReportCsv(limit = 20): Promise<string> {
+    const rows = (await this.getTopSellingReport(limit)) as TopSellingRow[];
+
+    return this.buildCsv([
+      ['medicineId', 'medicineName', 'totalSold', 'totalRevenue'],
+      ...rows.map((row) => [row.medicineId, row.medicineName, row.totalSold, row.totalRevenue]),
+    ]);
+  }
+
+  async getDashboardTrends() {
+    const [revenueTrend, categoryBreakdown] = await Promise.all([
+      this.salesRepo.getRevenueTrend(7),
+      this.inventoryRepo.getCategoryBreakdown(8),
+    ]);
+
+    return {
+      revenueTrend,
+      categoryBreakdown,
+    };
+  }
+
+  async getDashboardSummary(): Promise<DashboardSummary> {
+    const [todaySales, inventoryValue, inventoryKpis, categoryBreakdown, topMedicines] = await Promise.all([
+      this.salesRepo.getDailySales(new Date()),
+      this.inventoryRepo.getInventoryValue(),
+      this.inventoryRepo.getInventoryKpis(),
+      this.inventoryRepo.getCategoryBreakdown(5),
       this.salesRepo.getTopSellingMedicines(5),
     ]);
 
     return {
       today: todaySales,
+      revenueTrend: await this.salesRepo.getRevenueTrend(7),
       inventoryValue,
-      alerts: {
-        lowStockCount: lowStockItems.length,
-        expiringCount: expiringItems.length,
-      },
+      inventoryKpis,
+      categoryBreakdown,
       topMedicines,
     };
+  }
+
+  private buildCsv(rows: Array<Array<string | number | undefined | null>>): string {
+    return rows
+      .map((row) => row.map((value) => this.escapeCsvValue(value)).join(','))
+      .join('\n');
+  }
+
+  private escapeCsvValue(value: string | number | undefined | null): string {
+    if (value === null || value === undefined) return '';
+    const stringValue = String(value);
+    if (/[",\n\r]/.test(stringValue)) {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
   }
 }
